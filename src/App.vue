@@ -2,23 +2,25 @@
 
 <template>
     <div id="app">
-        <v-dropdown v-model="selectedSearchtype" :options="searchtypes" placeholder="Søgmetode" optionLabel="name"
+        <v-dropdown v-model="selectedSearchtype" @change="updateSearchInput(searchinput)" :options="searchtypes" placeholder="Søgmetode" optionLabel="name"
             class="w-full md:w-14rem" />
         <InputText @update:modelValue="updateSearchInput" id="searchinput" placeholder="Søg" v-model="searchinput"
             :class="{ 'p-invalid': errorMessage }" />
-        <VirtualScroller :items="searchitems" :itemSize="21" class="border-1 surface-border border-round"
-            style="width: 500px; height: 600px">
-            <template v-slot:item="{ item, options }">
-                <table :class="['flex align-items-center p-2', { 'surface-hover': options.odd }]" style="height: 30px">
-                    <tr>
-                        <td style="text-align:right; width: 190px;">{{ dict[item].prehooks }}</td>
-                        <td style="text-align: left; width: 100px;"><strong>{{ item }}</strong></td>
-                        <td style="text-align: left;">{{ dict[item].sufhooks }}</td>
-                    </tr>
-                </table>
-            </template>
-        </VirtualScroller>
-
+        <div>
+            <h2 :hidden="!hitcount" id="hitcount">Søgning matcher {{ hitcount }} opslag</h2>
+            <VirtualScroller :items="searchitems" :itemSize="21" class="border-1 surface-border border-round"
+                style="width: 500px; height: 600px">
+                <template v-slot:item="{ item, options }">
+                    <table :title="getDictline(item)" :class="['flex align-items-center p-2', { 'surface-hover': options.odd }]" style="height: 30px">
+                        <tr>
+                            <td style="text-align:right; width: 190px;">{{ dict[item].prehooks }}</td>
+                            <td style="text-align: left; width: 100px;"><strong>{{ item }}</strong></td>
+                            <td style="text-align: left;">{{ dict[item].sufhooks }}</td>
+                        </tr>
+                    </table>
+                </template>
+            </VirtualScroller>
+        </div>
     </div>
 </template>
 
@@ -26,6 +28,16 @@
 import { dictionary } from "./assets/all.js"
 import 'primevue/virtualscroller'
 const dict = dictionary
+const sorteddict = {};
+for (const key in dictionary) {
+    const sortkey = key.split("").sort((a, b) => a.localeCompare(b, 'da')).join("");
+    let slot = sorteddict[sortkey];
+    if (!slot) {
+        slot = sorteddict[sortkey] = []
+    }
+    slot.push(key);
+    if (sorteddict[sortkey].length > 11) console.log(sortkey + ' ' + sorteddict[sortkey].join(", "));
+}
 
 let errorMessage = ""
 
@@ -33,7 +45,6 @@ const allowedCharactersString = 'abcdefghijklmnopqrstuvxxyzæøå.[]|()*12345';
 function updateSearchInput(value) {
     const allowedCharacters = allowedCharactersString.toUpperCase().split('');
     let filteredValue = value.toUpperCase().split('').filter(char => allowedCharacters.includes(char)).join('');
-    searchinput.value = filteredValue;
     let group = validSearchinput(filteredValue);
     if (!group) {
         errorMessage = 1;
@@ -46,7 +57,7 @@ function updateSearchInput(value) {
 }
 
 function validSearchinput(value) {
-    const regexp = /([A-ZÆØÅ.][2-5]?|.[2-5]?|\[[A-ZÆØÅ]*?\][2-5]?|\*)/g
+    const regexp = /([A-ZÆØÅ.][2-5]?|\[[A-ZÆØÅ]+?\][2-5]?|\*)/g
     let groups = value.match(regexp);
     let l = 0;
     if (groups) {
@@ -62,88 +73,102 @@ function validSearchinput(value) {
         return false;
     }
 }
+
+function getDictline( item ) {
+    return dictionary[item].dictline.replace(/\b([2-9]\.)/g,"\n$1");
+}
+
 function updateSearch(groups) {
-    const permutate = (groups) => {
+    console.log(selectedSearchtype.value)
+    function subsets(arr) {
         const result = [];
-        const backtrack = (currentPermutation, remainingElements) => {
-            if (remainingElements.length === 0) {
-                result.push(currentPermutation);
+
+        function generateSubsets(index, currentSubset) {
+            if (index === arr.length) {
+                if (currentSubset.length > 0) {
+                    result.push(currentSubset.slice());  // Add a copy of the subset
+                }
                 return;
             }
-            for (let i = 0; i < remainingElements.length; i++) {
-                const newPermutation = [...currentPermutation, remainingElements[i]];
-                const newRemaining = [
-                    ...remainingElements.slice(0, i),
-                    ...remainingElements.slice(i + 1)
-                ];
-                backtrack(newPermutation, newRemaining);
-            }
-        };
-        backtrack([], groups);
-        return result;
-    };
 
-    function subsets(groups) {
-        let subs = [];
-        function subset_helper(gr) {
-            if (gr.length === 0) return [];
-            if (gr.length === 1) return [gr];
-            let el = gr.pop();
-            const s = subset_helper(gr)
-            const ss = s;
-            ss.forEach((sub) => {
-                sub.push(el)
-            });
-            subs = subs.concat(ss)
+            currentSubset.push(arr[index]);
+            generateSubsets(index + 1, currentSubset);
+            currentSubset.pop();
+            generateSubsets(index + 1, currentSubset);
         }
-        subset_helper(groups)
-        return subs
+
+        generateSubsets(0, []);
+        return result.filter((ss) => ss.length > 1);
     }
 
     let rawresultlist = [];
-    let performedsearch = {}
+    let performedsearch = {};
 
-    function searchgroup(gr) {
-        let patternString = '^(' + gr.join('') + ')$'
-        if (performedsearch[patternString]) return;
-        performedsearch[patternString] = 1
-        let re = new RegExp(patternString);
-        const keylist = Object.keys(dictionary);
-        for(let i = 0; i < keylist.length; i++) {
-            const element = keylist[i];
-            let matches = element.match(re);
-            if (matches)  {
-                rawresultlist.push(element);
-            }
-        }
-    }
-
-    if (groups) {
-        rawresultlist = [];
-        performedsearch = {};
-        let gr = []
-        groups.forEach((g) => { if (g === '*') { gr.push('.*') } else { gr.push(g) } })
-
-        if (selectedSearchtype.value === 'A') {
-            let p = permutate(gr);
-            for (let i = 0; i < p.length; i++) {
-                searchgroup(p[i]);
-            }
-        }
-        else if (selectedSearchtype.value === 'M') {
-            searchgroup(gr)
-        }
-        else if (selectedSearchtype.value === 'SA') {
-            let subs = subsets(gr);
-            for (let i = 0; i < subs.length; i++) {
-                let p = permutate(subs[i]);
-                for (let i = 0; i < p.length; i++) {
-                    searchgroup(p[i]);
+    function expandGroup(gr) {
+        let gr2 = gr.map((g) => g === '.' ? '[ABCDEFGHIJKLMNOPQRSTUVWXYZÆØÅ]' : g)
+        let pres = [[]];
+        for (let i = 0; i < gr2.length; i++) {
+            if (gr[i].substring(0, 1) === '[') {
+                let s = gr2[i].replace(/[^A-ZÆØÅ]/g, '')
+                for (let j = pres.length -1; j >=0; j--) {
+                    let p = pres[j];
+                    let newp = s.split("").map( (letter) => [...p,letter])
+                    pres.splice(j,1,...newp)
                 }
             }
+            else {
+                pres.forEach((pre) => { pre.push(gr2[i]) });
+            }
         }
-        searchitems.value = [...new Set(rawresultlist)].sort()
+        console.log("pre.length="+pres.length)
+        return pres;
     }
+    function searchgroup(gr) {
+        let grSort = gr;
+        grSort.sort((a, b) => a.localeCompare(b, 'da'));
+        const grStr = grSort.join("");
+        if (performedsearch[grStr]) {
+            return;
+        }
+        else {
+            performedsearch[grStr] = 1
+        }
+        if (sorteddict[grStr]) {
+            console.log("Hits");
+            rawresultlist.push(...sorteddict[grStr]);
+            return;
+        }
+        else {
+            console.log("Expand");
+            expandGroup(grSort).forEach(searchgroup)
+        }
+    }
+
+    if (groups && groups.length > 1) {
+        rawresultlist = [];
+        performedsearch = {};
+        //        let gr = []
+        //        groups.forEach((g) => { if (g === '*') { gr.push('.*') } else { gr.push(g) } })
+
+        if (selectedSearchtype.value.code === 'A') {
+            searchgroup(groups);
+        }
+        else if (selectedSearchtype.value.code === 'M') {
+            searchgroup(groups)
+        }
+        else if (selectedSearchtype.value.code === 'SA') {
+            let subs = subsets(groups);
+            for (let i = 0; i < subs.length; i++) {
+                searchgroup(subs[i]);
+            }
+        }
+        searchitems.value = [...new Set(rawresultlist)].sort((a, b) => a.localeCompare(b, 'da'))
+        hitcount.value = searchitems.value.length
+    }
+    else {
+        searchitems.value = Object.keys(dictionary);
+    }
+
 }
 
 import { ref } from "vue";
@@ -153,9 +178,11 @@ const searchtypes = ref([
     { name: 'SUBANAGRAM', code: 'SA' },
     { name: 'MØNSTER', code: 'M' }
 ]);
-const selectedSearchtype = ref('A')
+const hitcount = ref();
+const selectedSearchtype = ref(searchtypes.value[0])
 const searchinput = ref()
 var searchitems = ref(Object.keys(dictionary))
+hitcount.value = searchitems.value.length
 
 </script>
 
@@ -170,6 +197,11 @@ var searchitems = ref(Object.keys(dictionary))
 
 }
 
-#searchinput { text-transform:uppercase; }
+#hitcount {
+    text-align: left;
+}
 
+#searchinput {
+    text-transform: uppercase;
+}
 </style>
